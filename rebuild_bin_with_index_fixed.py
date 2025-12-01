@@ -121,6 +121,9 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
             offset = offsets.get(letter, 0)
             # 以小端格式写入4字节整数
             out_f.write(struct.pack('<I', offset))
+        # 写入最后一个
+        offset = current_offset
+        out_f.write(struct.pack('<I', offset))
         
         print(f"重建完成，共处理了 {total_count} 条记录")
         print("各字母相对于0x6D的偏移量:")
