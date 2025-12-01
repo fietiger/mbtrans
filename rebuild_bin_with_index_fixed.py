@@ -24,8 +24,8 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
       - （N-2）个字节的汉字（UTF-16编码）
       - 6个字节的0x00
     """
-    # 读取所有数据并按首字母分组
-    data_by_letter = defaultdict(list)
+    # 读取所有数据并存储
+    all_data = []
     with open(input_txt_file, 'r', encoding='utf-8') as in_f:
         for line in in_f:
             line = line.strip()
@@ -43,7 +43,10 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
             # 获取首字母
             first_letter = get_first_letter(letters)
             if first_letter.isalpha() and first_letter.islower():
-                data_by_letter[first_letter].append((letters, chinese))
+                all_data.append((letters, chinese))
+    
+    # 按字母顺序排序所有数据
+    all_data.sort(key=lambda x: x[0])  # 按照字母码排序
     
     # 创建新的bin文件
     with open(output_bin_file, 'wb') as out_f:
@@ -54,38 +57,60 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
         offsets = {}
         current_offset = 0  # 相对于0x6D的偏移量，a开头的数据从0开始
         
-        # 按字母顺序处理数据
-        total_count = 0
+        # 初始化所有字母的偏移量为0
         for letter in 'abcdefghijklmnopqrstuvwxyz':
-            # 记录当前字母数据的起始偏移量（相对于0x6D）
-            offsets[letter] = current_offset
+            offsets[letter] = 0
             
-            # 写入该字母的所有数据
-            if letter in data_by_letter:
-                for letters, chinese in data_by_letter[letter]:
-                    # 计算长度
-                    m = len(letters)  # 码的长度
-                    chinese_utf16 = chinese.encode('utf-16-le')  # 汉字转UTF-16 LE
-                    n = len(chinese_utf16) + 2  # 汉字的字节长度+2
-                    
-                    # 写入第一个字节：码的长度M
-                    out_f.write(struct.pack('B', m))
-                    
-                    # 写入第二个字节：汉字的字节长度+2（N）
-                    out_f.write(struct.pack('B', n))
-                    
-                    # 写入M个字母
-                    out_f.write(letters.encode('ascii'))
-                    
-                    # 写入（N-2）个字节的汉字（UTF-16编码）
-                    out_f.write(chinese_utf16)
-                    
-                    # 写入6个字节的0x00
-                    out_f.write(b'\x00' * 6)
-                    
-                    # 更新偏移量和计数
-                    current_offset += 1 + 1 + m + len(chinese_utf16) + 6
-                    total_count += 1
+        # 遍历排序后的数据，记录每个字母首次出现的位置
+        total_count = 0
+        prev_first_letter = ''
+        for letters, chinese in all_data:
+            # 获取首字母
+            first_letter = get_first_letter(letters)
+            
+            # 如果是新字母的开始，记录偏移量
+            if first_letter != prev_first_letter and first_letter.isalpha() and first_letter.islower():
+                offsets[first_letter] = current_offset
+                # 同时设置之前未设置的字母偏移量
+                prev_index = ord(prev_first_letter) - ord('a') if prev_first_letter else -1
+                curr_index = ord(first_letter) - ord('a')
+                for i in range(prev_index + 1, curr_index):
+                    letter = chr(ord('a') + i)
+                    if offsets[letter] == 0:  # 还未设置偏移量
+                        offsets[letter] = current_offset
+                prev_first_letter = first_letter
+            
+            # 计算长度
+            m = len(letters)  # 码的长度
+            chinese_utf16 = chinese.encode('utf-16-le')  # 汉字转UTF-16 LE
+            n = len(chinese_utf16) + 2  # 汉字的字节长度+2
+            
+            # 写入第一个字节：码的长度M
+            out_f.write(struct.pack('B', m))
+            
+            # 写入第二个字节：汉字的字节长度+2（N）
+            out_f.write(struct.pack('B', n))
+            
+            # 写入M个字母
+            out_f.write(letters.encode('ascii'))
+            
+            # 写入（N-2）个字节的汉字（UTF-16编码）
+            out_f.write(chinese_utf16)
+            
+            # 写入6个字节的0x00
+            out_f.write(b'\x00' * 6)
+            
+            # 更新偏移量和计数
+            current_offset += 1 + 1 + m + len(chinese_utf16) + 6
+            total_count += 1
+        
+        # 设置剩余字母的偏移量
+        if prev_first_letter:
+            prev_index = ord(prev_first_letter) - ord('a')
+            for i in range(prev_index + 1, 26):
+                letter = chr(ord('a') + i)
+                if offsets[letter] == 0:  # 还未设置偏移量
+                    offsets[letter] = current_offset
         
         # 记录文件结束位置
         offsets['end'] = current_offset
