@@ -78,7 +78,7 @@ def calculate_offsets(data_list):
 def write_bin_file(output_file, data_list, offsets):
     """写入二进制文件"""
     with open(output_file, 'wb') as f:
-        # 写入文件头：1字节0x00 + 104字节索引表 + 4字节填充
+        # 写入文件头：1字节0x00 + 108字节索引表
         f.write(b'\x00')
         
         # 写入索引表：第一个是0,后面26个是每个字母的结束偏移量
@@ -86,8 +86,7 @@ def write_bin_file(output_file, data_list, offsets):
         for letter in 'abcdefghijklmnopqrstuvwxyz':
             f.write(struct.pack('<I', offsets[letter]))
         
-        # 写入4字节填充,使数据从0x6D开始
-        f.write(b'\x00' * 4)
+        # 此时应该正好是109字节，数据从0x6D (109)开始
         
         # 写入所有数据条目
         for letters, chinese in data_list:
@@ -100,9 +99,10 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
     
     文件格式：
     - 0x00: 1字节标志位(0x00)
-    - 0x01-0x04: 第一个索引(固定为0)
-    - 0x05-0x6C: 26个字母的结束偏移量(相对于0x6D,小端格式)
-    - 0x6D开始: 实际数据
+    - 0x01-0x6C: 27个4字节整数索引表(小端格式)
+      - 第1个: 固定为0
+      - 第2-27个: a-z各字母的结束偏移量(相对于0x6D)
+    - 0x6D(109)开始: 实际数据
     
     数据条目格式：
     - 1字节: 字母码长度M
@@ -124,6 +124,7 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
     print(f"\n重建完成！")
     print(f"输出文件: {output_bin_file}")
     print(f"数据区总大小: {total_size} 字节")
+    print(f"文件头大小: 109 字节 (0x00 + 27个索引)")
     print("\n各字母结束偏移量(相对于0x6D):")
     for i, letter in enumerate('abcdefghijklmnopqrstuvwxyz'):
         print(f"  {letter}: {offsets[letter]:6d}", end="")
