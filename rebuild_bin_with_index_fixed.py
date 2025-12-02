@@ -2,140 +2,136 @@
 # -*- coding: utf-8 -*-
 
 import struct
-from collections import defaultdict
 
-def get_first_letter(text):
-    """获取文本的第一个字符"""
-    if text and len(text) > 0:
-        return text[0]
-    return ''
-
-def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
-    """
-    根据文本文件重建bin文件，并在文件开头维护索引表
-    格式：
-    - 第1个字节：0x00
-    - 接下来的26*4=104个字节：索引表，记录每个字母开头的数据相对于0x6D偏移量的位置（LE格式）
-    - 0x6D之后：实际数据
-    - 数据格式：
-      - 第一个字节：码的长度M
-      - 第二个字节：汉字的字节长度+2（N）
-      - M个字母（从a到z）
-      - （N-2）个字节的汉字（UTF-16编码）
-      - 6个字节的0x00
-    """
-    # 读取所有数据并存储
-    all_data = []
-    with open(input_txt_file, 'r', encoding='utf-8') as in_f:
-        for line in in_f:
+def read_input_data(txt_file):
+    """读取并解析输入文本文件"""
+    data_list = []
+    with open(txt_file, 'r', encoding='utf-8') as f:
+        for line in f:
             line = line.strip()
             if not line:
                 continue
-                
-            # 分割字母和汉字
+            
             parts = line.split(' ', 1)
             if len(parts) != 2:
                 continue
-                
-            letters = parts[0]
-            chinese = parts[1]
             
-            # 获取首字母
-            first_letter = get_first_letter(letters)
-            if first_letter.isalpha() and first_letter.islower():
-                all_data.append((letters, chinese))
+            letters, chinese = parts
+            if letters and letters[0].isalpha() and letters[0].islower():
+                data_list.append((letters, chinese))
     
-    # 按字母顺序排序所有数据
-    all_data.sort(key=lambda x: x[0])  # 按照字母码排序
-    
-    # 创建新的bin文件
-    with open(output_bin_file, 'wb') as out_f:
-        # 先写入109个字节的占位符（1个字节0x00 + 104个字节索引表 + 3个字节填充）
-        out_f.write(b'\x00' * 109)
-        
-        # 记录每个字母相对于0x6D的偏移量
-        offsets = {}
-        ends ={}
-        current_offset = 0  # 相对于0x6D的偏移量，a开头的数据从0开始
-        
-        # 初始化所有字母的偏移量为0
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            offsets[letter] = 0
-            ends[letter] =0
-            
-        # 遍历排序后的数据，记录每个字母首次出现的位置
-        total_count = 0
-        prev_first_letter = ''
-        for letters, chinese in all_data:
-            # 获取首字母
-            first_letter = get_first_letter(letters)
-            
-            # 如果是新字母的开始，记录偏移量
-            if first_letter != prev_first_letter and first_letter.isalpha() and first_letter.islower():
-                offsets[first_letter] = current_offset
-                # 同时设置之前未设置的字母偏移量
-                prev_index = ord(prev_first_letter) - ord('a') if prev_first_letter else -1
-                curr_index = ord(first_letter) - ord('a')
-                for i in range(prev_index + 1, curr_index):
-                    letter = chr(ord('a') + i)
-                    if offsets[letter] == 0:  # 还未设置偏移量
-                        offsets[letter] = current_offset
-                prev_first_letter = first_letter
-            
-            # 计算长度
-            m = len(letters)  # 码的长度
-            chinese_utf16 = chinese.encode('utf-16-le')  # 汉字转UTF-16 LE
-            n = len(chinese_utf16) + 2  # 汉字的字节长度+2
-            
-            # 写入第一个字节：码的长度M
-            out_f.write(struct.pack('B', m))
-            
-            # 写入第二个字节：汉字的字节长度+2（N）
-            out_f.write(struct.pack('B', n))
-            
-            # 写入M个字母
-            out_f.write(letters.encode('ascii'))
-            
-            # 写入（N-2）个字节的汉字（UTF-16编码）
-            out_f.write(chinese_utf16)
-            
-            # 写入6个字节的0x00
-            out_f.write(b'\x00' * 6)
-            
-            # 更新偏移量和计数
-            current_offset += 1 + 1 + m + len(chinese_utf16) + 6
-            total_count += 1
-        
-        # 设置剩余字母的偏移量
-        if prev_first_letter:
-            prev_index = ord(prev_first_letter) - ord('a')
-            for i in range(prev_index + 1, 26):
-                letter = chr(ord('a') + i)
-                if offsets[letter] == 0:  # 还未设置偏移量
-                    offsets[letter] = current_offset
-        
-        # 记录文件结束位置
-        offsets['end'] = current_offset
-        for letter in 'abcdefghijklmnopqrstuvwxy':
-            ends[letter] =offsets[chr(ord(letter) + 1)]
-        ends['z'] = offsets['end']
-        # 回到文件开头，写入索引表
-        out_f.seek(1)  # 从第2个字节开始写入索引表
-        out_f.write(struct.pack('<I', 0))
-        for letter in 'abcdefghijklmnopqrstuvwxyz':
-            offset = ends.get(letter, 0)
-            # 以小端格式写入4字节整数
-            out_f.write(struct.pack('<I', offset))
-        # 写入最后一个
+    # 按字母码排序
+    data_list.sort(key=lambda x: x[0])
+    return data_list
 
+
+def encode_entry(letters, chinese):
+    """将一条记录编码为二进制格式"""
+    m = len(letters)
+    chinese_utf16 = chinese.encode('utf-16-le')
+    n = len(chinese_utf16) + 2
+    
+    # 组装数据：M(1字节) + N(1字节) + 字母(M字节) + 汉字(N-2字节) + 填充(6字节)
+    data = struct.pack('B', m)
+    data += struct.pack('B', n)
+    data += letters.encode('ascii')
+    data += chinese_utf16
+    data += b'\x00' * 6
+    
+    return data
+
+
+def calculate_offsets(data_list):
+    """计算每个字母对应的结束偏移量"""
+    # 初始化26个字母的偏移量
+    offsets = {chr(ord('a') + i): 0 for i in range(26)}
+    
+    current_offset = 0
+    current_letter = None
+    
+    for letters, chinese in data_list:
+        first_letter = letters[0]
         
-        print(f"重建完成，共处理了 {total_count} 条记录")
-        print("各字母相对于0x6D的偏移量:")
+        # 当遇到新字母时,更新之前字母的结束位置
+        if first_letter != current_letter:
+            if current_letter is not None:
+                # 填充从current_letter到first_letter之间的所有字母
+                start_idx = ord(current_letter) - ord('a')
+                end_idx = ord(first_letter) - ord('a')
+                for i in range(start_idx, end_idx):
+                    offsets[chr(ord('a') + i)] = current_offset
+            current_letter = first_letter
+        
+        # 计算这条记录的大小
+        entry_size = 2 + len(letters) + len(chinese.encode('utf-16-le')) + 6
+        current_offset += entry_size
+    
+    # 填充最后一个字母到'z'的偏移量
+    if current_letter:
+        start_idx = ord(current_letter) - ord('a')
+        for i in range(start_idx, 26):
+            offsets[chr(ord('a') + i)] = current_offset
+    
+    return offsets, current_offset
+
+
+def write_bin_file(output_file, data_list, offsets):
+    """写入二进制文件"""
+    with open(output_file, 'wb') as f:
+        # 写入文件头：1字节0x00 + 104字节索引表 + 4字节填充
+        f.write(b'\x00')
+        
+        # 写入索引表：第一个是0,后面26个是每个字母的结束偏移量
+        f.write(struct.pack('<I', 0))
         for letter in 'abcdefghijklmnopqrstuvwxyz':
-            print(f"  {letter}: {offsets.get(letter, 0)}")
+            f.write(struct.pack('<I', offsets[letter]))
+        
+        # 写入4字节填充,使数据从0x6D开始
+        f.write(b'\x00' * 4)
+        
+        # 写入所有数据条目
+        for letters, chinese in data_list:
+            f.write(encode_entry(letters, chinese))
+
+
+def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
+    """
+    根据文本文件重建bin文件,并在文件开头维护索引表
+    
+    文件格式：
+    - 0x00: 1字节标志位(0x00)
+    - 0x01-0x04: 第一个索引(固定为0)
+    - 0x05-0x6C: 26个字母的结束偏移量(相对于0x6D,小端格式)
+    - 0x6D开始: 实际数据
+    
+    数据条目格式：
+    - 1字节: 字母码长度M
+    - 1字节: 汉字字节长度+2(N)
+    - M字节: 字母码(ASCII)
+    - N-2字节: 汉字(UTF-16-LE)
+    - 6字节: 填充(0x00)
+    """
+    print(f"读取输入文件: {input_txt_file}")
+    data_list = read_input_data(input_txt_file)
+    print(f"共读取 {len(data_list)} 条记录")
+    
+    print("计算索引偏移量...")
+    offsets, total_size = calculate_offsets(data_list)
+    
+    print("写入输出文件...")
+    write_bin_file(output_bin_file, data_list, offsets)
+    
+    print(f"\n重建完成！")
+    print(f"输出文件: {output_bin_file}")
+    print(f"数据区总大小: {total_size} 字节")
+    print("\n各字母结束偏移量(相对于0x6D):")
+    for i, letter in enumerate('abcdefghijklmnopqrstuvwxyz'):
+        print(f"  {letter}: {offsets[letter]:6d}", end="")
+        if (i + 1) % 5 == 0:
+            print()  # 每5个换行
+
 
 if __name__ == "__main__":
     input_txt_file = "def3_output.txt"
     output_bin_file = "rebuilt_def3_with_index_fixed.bin"
     rebuild_bin_file_with_index(input_txt_file, output_bin_file)
-    print(f"重建的bin文件已保存到 {output_bin_file}")
