@@ -2,23 +2,34 @@
 # -*- coding: utf-8 -*-
 
 import struct
+import re
 
 def read_input_data(txt_file):
-    """读取并解析输入文本文件"""
+    """读取并解析输入文本文件，去除重复内容（包括行中间有多个空格的情况）"""
     data_list = []
+    seen_entries = set()  # 用于跟踪已经处理过的条目，实现去重
+    
     with open(txt_file, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             
-            parts = line.split(' ', 1)
+            # 将连续的空格替换为单个空格，用于标准化行内容
+            normalized_line = re.sub(r'\s+', ' ', line)
+            
+            # 分割标准化后的行
+            parts = normalized_line.split(' ', 1)
             if len(parts) != 2:
                 continue
             
             letters, chinese = parts
             if letters and letters[0].isalpha() and letters[0].islower():
-                data_list.append((letters, chinese))
+                # 使用元组(letters, chinese)作为键进行去重
+                entry_key = (letters, chinese)
+                if entry_key not in seen_entries:
+                    seen_entries.add(entry_key)
+                    data_list.append(entry_key)
     
     # 按字母码排序
     data_list.sort(key=lambda x: x[0])
