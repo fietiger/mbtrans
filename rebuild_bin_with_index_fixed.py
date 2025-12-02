@@ -55,11 +55,13 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
         
         # 记录每个字母相对于0x6D的偏移量
         offsets = {}
+        ends ={}
         current_offset = 0  # 相对于0x6D的偏移量，a开头的数据从0开始
         
         # 初始化所有字母的偏移量为0
         for letter in 'abcdefghijklmnopqrstuvwxyz':
             offsets[letter] = 0
+            ends[letter] =0
             
         # 遍历排序后的数据，记录每个字母首次出现的位置
         total_count = 0
@@ -114,16 +116,18 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
         
         # 记录文件结束位置
         offsets['end'] = current_offset
-        
+        for letter in 'abcdefghijklmnopqrstuvwxy':
+            ends[letter] =offsets[chr(ord(letter) + 1)]
+        ends['z'] = offsets['end']
         # 回到文件开头，写入索引表
         out_f.seek(1)  # 从第2个字节开始写入索引表
+        out_f.write(struct.pack('<I', 0))
         for letter in 'abcdefghijklmnopqrstuvwxyz':
-            offset = offsets.get(letter, 0)
+            offset = ends.get(letter, 0)
             # 以小端格式写入4字节整数
             out_f.write(struct.pack('<I', offset))
         # 写入最后一个
-        offset = current_offset
-        out_f.write(struct.pack('<I', offset))
+
         
         print(f"重建完成，共处理了 {total_count} 条记录")
         print("各字母相对于0x6D的偏移量:")
