@@ -43,20 +43,20 @@ namespace CodeTableExtractor
 
         private AutomationElement listControl;
 
-        private AutomationElement targetWindow;
+        // 实时保存文件路径
+        private string saveFilePath = string.Empty;
 
         // 用于记录运行时间
         private System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
+
+        private AutomationElement targetWindow;
         private System.Windows.Threading.DispatcherTimer timer = new System.Windows.Threading.DispatcherTimer();
-        
-        // 实时保存文件路径
-        private string saveFilePath = string.Empty;
 
         public MainWindow()
         {
             InitializeComponent();
             extractedData = new List<CodeItem>();
-            
+
             // 初始化计时器
             timer.Interval = TimeSpan.FromSeconds(1);
             timer.Tick += Timer_Tick;
@@ -146,259 +146,6 @@ namespace CodeTableExtractor
             catch (Exception ex)
             {
                 txtResult.AppendText($"枚举子控件出错: {ex.Message}\n");
-            }
-        }
-
-        /// <summary>
-        /// 计时器Tick事件
-        /// </summary>
-        private void Timer_Tick(object sender, EventArgs e)
-        {
-            if (stopwatch.IsRunning)
-            {
-                TimeSpan elapsed = stopwatch.Elapsed;
-                txtRunTime.Text = string.Format("运行时间: {0:00}:{1:00}:{2:00}", 
-                    elapsed.Hours, elapsed.Minutes, elapsed.Seconds);
-            }
-        }
-
-        /// <summary>
-        /// 开始提取按钮点击事件
-        /// </summary>
-        private void BtnStartExtract_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (targetWindow == null || listControl == null)
-                {
-                    System.Windows.MessageBox.Show("请先查找窗口和表格控件");
-                    return;
-                }
-
-                txtResult.AppendText("\n开始提取数据...\n");
-                extractedData.Clear();
-                
-                // 让用户选择保存路径
-                Microsoft.Win32.SaveFileDialog saveFileDialog = new Microsoft.Win32.SaveFileDialog();
-                saveFileDialog.Filter = "CSV文件|*.csv";
-                saveFileDialog.Title = "保存提取结果";
-                if (saveFileDialog.ShowDialog() != true)
-                {
-                    txtResult.AppendText("操作已取消。\r\n");
-                    return;
-                }
-                saveFilePath = saveFileDialog.FileName;
-
-                // 写入CSV文件头
-                using (StreamWriter sw = new StreamWriter(saveFilePath, false, Encoding.UTF8))
-                {
-                    sw.WriteLine("序号,编码,词条,分类,候选排序");
-                }
-
-                // 重置进度条
-                progressBar.Value = 0;
-                txtProgress.Text = "进度: 0/0";
-                
-                // 启动秒表
-                stopwatch.Restart();
-                timer.Start();
-
-                // 确保窗口和控件获得焦点
-                AutomationElement focusedElement = AutomationElement.FocusedElement;
-                if (focusedElement != targetWindow)
-                {
-                    // 激活窗口
-                    ((WindowPattern)targetWindow.GetCurrentPattern(WindowPattern.Pattern)).SetWindowVisualState(WindowVisualState.Normal);
-                    ((WindowPattern)targetWindow.GetCurrentPattern(WindowPattern.Pattern)).WaitForInputIdle(1000);
-                }
-
-                // 确保ListControl获得焦点
-                listControl.SetFocus();
-                System.Threading.Thread.Sleep(500);
-
-                // 滚动到顶部
-                WinForms.SendKeys.SendWait("{HOME}");
-                System.Threading.Thread.Sleep(500);
-
-                // 获取ListView的实际项目数量
-                IntPtr listViewHandle = new IntPtr(listControl.Current.NativeWindowHandle);
-                int totalItems = SendMessage(listViewHandle, LVM_GETITEMCOUNT, 0, 0);
-                
-                txtResult.AppendText($"发现项目数量: {totalItems}\n");
-                
-                // 设置进度条最大值
-                progressBar.Maximum = totalItems;
-                
-                // 提取数据
-                int maxAttempts = totalItems > 0 ? totalItems : 147645;  // 使用实际数量或默认值
-                int successCount = 0;
-                int failedCount = 0;
-                int maxFailed = 3;     // 连续失败3次停止
-
-                for (int i = 0; i < maxAttempts; i++)
-                {
-                    if (failedCount >= maxFailed)
-                    {
-                        txtResult.AppendText("连续失败3次，停止提取\n");
-                        break;
-                    }
-
-                    try
-                    {
-                        txtResult.AppendText($"\n处理第 {i + 1} 行...\n");
-
-                        // 复制当前行
-                        WinForms.SendKeys.SendWait("^c");
-                        System.Threading.Thread.Sleep(800);
-
-                        // 读取剪贴板数据
-                        string clipboardData = System.Windows.Clipboard.GetText();
-
-                        if (!string.IsNullOrEmpty(clipboardData))
-                        {
-                            txtResult.AppendText($"   剪贴板数据: '{clipboardData}'\n");
-
-                            // 解析数据
-                            string[] columns = clipboardData.Trim().Split('\t');
-                            if (columns.Length < 2)
-                            {
-                                // 如果没有制表符分隔，尝试使用空格
-                                columns = Regex.Split(clipboardData.Trim(), @"\s+");
-                            }
-
-                            if (columns.Length >= 2)
-                            {
-                                CodeItem item = new CodeItem
-                                {
-                                    Index = i + 1,
-                                    Word = columns[0].Trim(),
-                                    Code = columns[1].Trim(),
-                                    Category = columns.Length > 2 ? columns[2].Trim() : "",
-                                    Sort = columns.Length > 3 ? columns[3].Trim() : ""
-                                };
-
-                                if (!string.IsNullOrEmpty(item.Word) && !string.IsNullOrEmpty(item.Code))
-                                {
-                                    // 检查重复
-                                    if (!extractedData.Any(x => x.Word == item.Word && x.Code == item.Code))
-                                    {
-                                        extractedData.Add(item);
-                                    successCount++;
-
-                                    // 实时保存到CSV文件
-                                    using (StreamWriter sw = new StreamWriter(saveFilePath, true, Encoding.UTF8))
-                                    {
-                                        sw.WriteLine($"{item.Index},\"{item.Code}\",\"{item.Word}\",\"{item.Category}\",\"{item.Sort}\"");
-                                    }
-
-                                    // 检查并清空日志（如果内容过长）
-if (txtResult.Text.Length > 10000)
-{
-    txtResult.Clear();
-    txtResult.AppendText("--- 日志已自动清空 ---\r\n");
-}
-
-// 显示提取成功的信息
-txtResult.AppendText($"✅ 提取成功: 编码={item.Code} | 词条={item.Word}\n");
-                                    failedCount = 0;  // 重置失败计数
-                                      
-                                    // 更新进度
-                                    progressBar.Value = i + 1;
-                                    txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
-                                      
-                                    // 刷新UI
-                                    this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                                    }
-                                    else
-                                    {
-                                        txtResult.AppendText($"⚠️  重复数据: 编码={item.Code} | 词条={item.Word}\n");
-                                        failedCount++;
-                                         
-                                        // 更新进度
-                                        progressBar.Value = i + 1;
-                                        txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
-                                         
-                                        // 刷新UI
-                                        this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                                    }
-                                }
-                                else
-                                {
-                                    txtResult.AppendText("❌ 数据无效\n");
-                                    failedCount++;
-                                     
-                                    // 更新进度
-                                    progressBar.Value = i + 1;
-                                    txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
-                                     
-                                    // 刷新UI
-                                    this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                                }
-                            }
-                            else
-                            {
-                                txtResult.AppendText($"❌ 列数不足: {columns.Length}列\n");
-                                failedCount++;
-                                 
-                                // 更新进度
-                                progressBar.Value = i + 1;
-                                txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
-                                 
-                                // 刷新UI
-                                this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                            }
-                        }
-                        else
-                        {
-                            txtResult.AppendText("❌ 剪贴板数据为空\n");
-                            failedCount++;
-                              
-                            // 更新进度
-                            progressBar.Value = i + 1;
-                            txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
-                              
-                            // 刷新UI
-                            this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                        }
-
-                        // 移动到下一行
-                        if (i < maxAttempts - 1)  // 最后一行不需要移动
-                        {
-                            WinForms.SendKeys.SendWait("{DOWN}");
-                            System.Threading.Thread.Sleep(500);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        txtResult.AppendText($"❌ 处理出错: {ex.Message}\n");
-                        failedCount++;
-                         
-                        // 更新进度
-                        progressBar.Value = i + 1;
-                        txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
-                         
-                        // 刷新UI
-                        this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
-                    }
-                }
-
-                // 停止秒表
-                stopwatch.Stop();
-                timer.Stop();
-                
-                // 更新最终运行时间
-                TimeSpan elapsed = stopwatch.Elapsed;
-                txtRunTime.Text = string.Format("运行时间: {0:00}:{1:00}:{2:00}", 
-                    elapsed.Hours, elapsed.Minutes, elapsed.Seconds);
-                
-                txtResult.AppendText($"\n数据提取完成，共提取 {extractedData.Count} 行\n");
-            }
-            catch (Exception ex)
-            {
-                // 发生异常时也停止计时器
-                stopwatch.Stop();
-                timer.Stop();
-                txtResult.AppendText($"提取数据出错: {ex.Message}\n");
             }
         }
 
@@ -499,6 +246,246 @@ txtResult.AppendText($"✅ 提取成功: 编码={item.Code} | 词条={item.Word}
         }
 
         /// <summary>
+        /// 开始提取按钮点击事件
+        /// </summary>
+        private void BtnStartExtract_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (targetWindow == null || listControl == null)
+                {
+                    System.Windows.MessageBox.Show("请先查找窗口和表格控件");
+                    return;
+                }
+
+                txtResult.AppendText("\n开始提取数据...\n");
+                extractedData.Clear();
+
+                // 让用户选择保存路径
+                Microsoft.Win32.SaveFileDialog saveFileDialog = new Microsoft.Win32.SaveFileDialog();
+                saveFileDialog.Filter = "CSV文件|*.csv";
+                saveFileDialog.Title = "保存提取结果";
+                if (saveFileDialog.ShowDialog() != true)
+                {
+                    txtResult.AppendText("操作已取消。\r\n");
+                    return;
+                }
+                saveFilePath = saveFileDialog.FileName;
+
+                // 写入CSV文件头
+                using (StreamWriter sw = new StreamWriter(saveFilePath, false, Encoding.UTF8))
+                {
+                    sw.WriteLine("序号,编码,词条,分类,候选排序");
+                }
+
+                // 重置进度条
+                progressBar.Value = 0;
+                txtProgress.Text = "进度: 0/0";
+
+                // 启动秒表
+                stopwatch.Restart();
+                timer.Start();
+
+                // 确保窗口和控件获得焦点
+                AutomationElement focusedElement = AutomationElement.FocusedElement;
+                if (focusedElement != targetWindow)
+                {
+                    // 激活窗口
+                    ((WindowPattern)targetWindow.GetCurrentPattern(WindowPattern.Pattern)).SetWindowVisualState(WindowVisualState.Normal);
+                    ((WindowPattern)targetWindow.GetCurrentPattern(WindowPattern.Pattern)).WaitForInputIdle(1000);
+                }
+
+                // 确保ListControl获得焦点
+                listControl.SetFocus();
+                System.Threading.Thread.Sleep(500);
+
+                // 滚动到顶部
+                WinForms.SendKeys.SendWait("{HOME}");
+                System.Threading.Thread.Sleep(500);
+
+                // 获取ListView的实际项目数量
+                IntPtr listViewHandle = new IntPtr(listControl.Current.NativeWindowHandle);
+                int totalItems = SendMessage(listViewHandle, LVM_GETITEMCOUNT, 0, 0);
+
+                txtResult.AppendText($"发现项目数量: {totalItems}\n");
+
+                // 设置进度条最大值
+                progressBar.Maximum = totalItems;
+
+                // 提取数据
+                int maxAttempts = totalItems > 0 ? totalItems : 147645;  // 使用实际数量或默认值
+                int successCount = 0;
+                int failedCount = 0;
+                int maxFailed = 3;     // 连续失败3次停止
+
+                for (int i = 0; i < maxAttempts; i++)
+                {
+                    if (failedCount >= maxFailed)
+                    {
+                        txtResult.AppendText("连续失败3次，停止提取\n");
+                        break;
+                    }
+
+                    try
+                    {
+                        txtResult.AppendText($"\n处理第 {i + 1} 行...\n");
+
+                        // 复制当前行
+                        WinForms.SendKeys.SendWait("^c");
+                        System.Threading.Thread.Sleep(800);
+
+                        // 读取剪贴板数据
+                        string clipboardData = System.Windows.Clipboard.GetText();
+
+                        if (!string.IsNullOrEmpty(clipboardData))
+                        {
+                            txtResult.AppendText($"   剪贴板数据: '{clipboardData}'\n");
+
+                            // 解析数据
+                            string[] columns = clipboardData.Trim().Split('\t');
+                            if (columns.Length < 2)
+                            {
+                                // 如果没有制表符分隔，尝试使用空格
+                                columns = Regex.Split(clipboardData.Trim(), @"\s+");
+                            }
+
+                            if (columns.Length >= 2)
+                            {
+                                CodeItem item = new CodeItem
+                                {
+                                    Index = i + 1,
+                                    Word = columns[0].Trim(),
+                                    Code = columns[1].Trim(),
+                                    Category = columns.Length > 2 ? columns[2].Trim() : "",
+                                    Sort = columns.Length > 3 ? columns[3].Trim() : ""
+                                };
+
+                                if (!string.IsNullOrEmpty(item.Word) && !string.IsNullOrEmpty(item.Code))
+                                {
+                                    // 检查重复
+                                    if (!extractedData.Any(x => x.Word == item.Word && x.Code == item.Code))
+                                    {
+                                        extractedData.Add(item);
+                                        successCount++;
+
+                                        // 实时保存到CSV文件
+                                        using (StreamWriter sw = new StreamWriter(saveFilePath, true, Encoding.UTF8))
+                                        {
+                                            sw.WriteLine($"{item.Index},\"{item.Code}\",\"{item.Word}\",\"{item.Category}\",\"{item.Sort}\"");
+                                        }
+
+                                        // 检查并清空日志（如果内容过长）
+                                        if (txtResult.Text.Length > 10000)
+                                        {
+                                            txtResult.Clear();
+                                            txtResult.AppendText("--- 日志已自动清空 ---\r\n");
+                                        }
+
+                                        // 显示提取成功的信息
+                                        txtResult.AppendText($"✅ 提取成功: 编码={item.Code} | 词条={item.Word}\n");
+                                        failedCount = 0;  // 重置失败计数
+
+                                        // 更新进度
+                                        progressBar.Value = i + 1;
+                                        txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
+
+                                        // 刷新UI
+                                        this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                                    }
+                                    else
+                                    {
+                                        txtResult.AppendText($"⚠️  重复数据: 编码={item.Code} | 词条={item.Word}\n");
+                                        failedCount++;
+
+                                        // 更新进度
+                                        progressBar.Value = i + 1;
+                                        txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
+
+                                        // 刷新UI
+                                        this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                                    }
+                                }
+                                else
+                                {
+                                    txtResult.AppendText("❌ 数据无效\n");
+                                    failedCount++;
+
+                                    // 更新进度
+                                    progressBar.Value = i + 1;
+                                    txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
+
+                                    // 刷新UI
+                                    this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                                }
+                            }
+                            else
+                            {
+                                txtResult.AppendText($"❌ 列数不足: {columns.Length}列\n");
+                                failedCount++;
+
+                                // 更新进度
+                                progressBar.Value = i + 1;
+                                txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
+
+                                // 刷新UI
+                                this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                            }
+                        }
+                        else
+                        {
+                            txtResult.AppendText("❌ 剪贴板数据为空\n");
+                            failedCount++;
+
+                            // 更新进度
+                            progressBar.Value = i + 1;
+                            txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
+
+                            // 刷新UI
+                            this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                        }
+
+                        // 移动到下一行
+                        if (i < maxAttempts - 1)  // 最后一行不需要移动
+                        {
+                            WinForms.SendKeys.SendWait("{DOWN}");
+                            System.Threading.Thread.Sleep(500);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        txtResult.AppendText($"❌ 处理出错: {ex.Message}\n");
+                        failedCount++;
+
+                        // 更新进度
+                        progressBar.Value = i + 1;
+                        txtProgress.Text = string.Format("进度: {0}/{1}", i + 1, maxAttempts);
+
+                        // 刷新UI
+                        this.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+                    }
+                }
+
+                // 停止秒表
+                stopwatch.Stop();
+                timer.Stop();
+
+                // 更新最终运行时间
+                TimeSpan elapsed = stopwatch.Elapsed;
+                txtRunTime.Text = string.Format("运行时间: {0:00}:{1:00}:{2:00}",
+                    elapsed.Hours, elapsed.Minutes, elapsed.Seconds);
+
+                txtResult.AppendText($"\n数据提取完成，共提取 {extractedData.Count} 行\n");
+            }
+            catch (Exception ex)
+            {
+                // 发生异常时也停止计时器
+                stopwatch.Stop();
+                timer.Stop();
+                txtResult.AppendText($"提取数据出错: {ex.Message}\n");
+            }
+        }
+
+        /// <summary>
         /// 子窗口枚举回调函数
         /// </summary>
         private bool EnumChildProc(IntPtr hWnd, IntPtr lParam)
@@ -563,6 +550,19 @@ txtResult.AppendText($"✅ 提取成功: 编码={item.Code} | 词条={item.Word}
             {
                 txtResult.AppendText($"获取ListView项目文本出错: {ex.Message}\n");
                 return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 计时器Tick事件
+        /// </summary>
+        private void Timer_Tick(object sender, EventArgs e)
+        {
+            if (stopwatch.IsRunning)
+            {
+                TimeSpan elapsed = stopwatch.Elapsed;
+                txtRunTime.Text = string.Format("运行时间: {0:00}:{1:00}:{2:00}",
+                    elapsed.Hours, elapsed.Minutes, elapsed.Seconds);
             }
         }
 
