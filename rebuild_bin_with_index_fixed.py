@@ -144,6 +144,6 @@ def rebuild_bin_file_with_index(input_txt_file, output_bin_file):
 
 
 if __name__ == "__main__":
-    input_txt_file = "def3_output.txt"
+    input_txt_file = "mb.txt"
     output_bin_file = "rebuilt_def3_with_index_fixed.bin"
     rebuild_bin_file_with_index(input_txt_file, output_bin_file)
